@@ -2,7 +2,7 @@
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 
 <head>
-    <title id='title'></title>
+    <title id='title'>Encrypt/Decrypt File</title>
 
     <!-- General META -->
     <meta charset="utf-8">
@@ -123,11 +123,9 @@
         <tbody>
             {{#each Items as |cert idx|}}
             <tr id="rrow_{{idx}}" data-issuer="{{cert.IssuerName}}" data-serialnum="{{cert.SerialNumber}}">
-                {{#ifSigner cert.SubjectName}}
                 <td>{{cert.SubjectName}}</td>
                 <td>{{cert.IssuerName}}</td>
                 <td>{{cert.SerialNumber}}</td>
-                {{/ifSigner}}
             </tr>
             {{/each}}
         </tbody>
@@ -140,6 +138,8 @@
     <script type="text/javascript" src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="https://stuk.github.io/jszip/dist/jszip.js"></script>
     <script src="handlebars-v3.0.1.js"></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/sha256.js"></script>
+
 
 
     <script type="application/javascript">
@@ -161,7 +161,7 @@
         var reciplistTemplate = Handlebars.compile($('#reciplist-template').html());
         var selectedRecipRowId = null;
         var reciplist = null;
-
+        var hashSeparator = '@@';
         var baseUrl = 'http://127.0.0.1:8877/'
         var linkEncrypt = baseUrl + 'signAndEncrypt';
         var linkDecrypt = baseUrl + 'decryptAndVerify';
@@ -169,12 +169,11 @@
 
         $(function () {
 
-            Handlebars.registerHelper('ifSigner', function (subject, options) {
-                if (subject.indexOf('-signer') != -1) {
-                    return options.fn(this);
-                } else {
-                    return options.inverse(this);
-                }
+
+
+            fileUpload.on('change', function () {
+                encryptedFile.hide();
+                decryptedFile.hide();
             });
 
             radioInput.change(function () {
@@ -183,9 +182,8 @@
                     radioSelected = 'encrypt';
                     decrypticon.hide();
                     encrypticon.show();
-
-
                 }
+
                 if (this.id === 'option2') {
                     recipientListContainer.hide();
                     radioSelected = 'decrypt';
@@ -214,7 +212,6 @@
                 };
                 reader.readAsText(file);
                 return defer.promise();
-
             }
 
             function recipRowClick(event) {
@@ -234,12 +231,17 @@
                 }).done(function (data) {
                     if (data) {
                         var signerData;
-                        $.each(data.Items, function (i, v) {
+                        var items = [];
 
-                        });
+                        $.each(data.Items, function (i, v) {
+                                                           items.push(v);
+                                                   });
+
+                        data.Items = items;
                         reciplist = data.Items;
                         $('#reciplistTable').html(reciplistTemplate(data));
-                        $('#reciplistTable tr').click(recipRowClick);
+                        $('#reciplistTable tbody tr').click(recipRowClick);
+
                         if (reciplist.length == 1) {
                             selectedRecipRowId = "rrow_0";
                         }
@@ -339,8 +341,8 @@
                 sign()
                     .done(function (result) {
                         var file = fileUpload[0].files[0];
-                        var extension = file.name.split('.').pop();
-                        var fileName = file.name.replace('.' + extension, '');
+                        //var extension = file.name.split('.').pop();
+                        //var fileName = file.name.replace('.' + extension, '');
                         //ZipFiles(fileUpload[0].files).done(function (value) {
                         FileToBase64(file)
                             .done(function (content) {
@@ -362,9 +364,13 @@
                                             defer.reject();
                                             return;
                                         }
-                                        var data = makeTextFile(result.cms);
+                                        var hash = CryptoJS.SHA256(result.cms).toString();
+
+
+
+                                        var data = makeTextFile(result.cms + hashSeparator + hash);
                                         encryptedFile[0].href = data;
-                                        encryptedFile[0].download = fileName + '.enist';
+                                        encryptedFile[0].download = file.name + '.enist';
                                         encryptedFile.show();
                                         defer.resolve(result);
                                     })
@@ -407,10 +413,28 @@
                         var file = fileUpload[0].files[0];
                         readTextFile(file)
                             .done(function (content) {
+                                if (content.indexOf(hashSeparator) === -1) {
+                                    alertMessage[0].innerHTML = 'The file is invalid';
+                                    alertMessage.show();
+                                    defer.reject();
+                                    return;
+                                }
+
+                                var split = content.split(hashSeparator);
+                                var hash = CryptoJS.SHA256(split[0]).toString();
+                                var isValid = hash === split[1];
+
+                                if (!isValid) {
+                                    alertMessage[0].innerHTML = 'The file is invalid';
+                                    alertMessage.show();
+                                    defer.reject();
+                                    return;
+                                }
+
                                 var item = result.Items[0];
                                 var req = {
                                     spin: spin.val(),
-                                    content: content
+                                    content: split[0]
                                 };
 
                                 post(linkDecrypt, req)
