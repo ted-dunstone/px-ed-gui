@@ -19,8 +19,6 @@
     <meta http-equiv="Cache-Control" content="no-cache">
     <meta http-equiv="Expires" content="Sat, 01 Dec 2001 00:00:00 GMT">
 
-
-
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css">
     <style>
         body {
@@ -84,7 +82,7 @@
         </div>
         <div class="row">
             <div class="col-xs-12">
-                <input id="fileUpload" type="file">
+                <input id="fileUpload" type="file" multiple>
             </div>
         </div>
         <div class="row">
@@ -103,11 +101,13 @@
         </div>
         <div class="row">
             <div class="col-xs-12">
+                <div class="downloadoptions"></div>
                 <a id="encryptedFile" download="" class="btn btn-success" style="display:none;">Download encrypted file</a>
                 <a id="decryptedFile" download="" class="btn btn-success" style="display:none;">Download decrypted file</a>
                 <div class="alert alert-danger" id="alert" style="display: none">Try again</div>
                 <div class="alert alert-warning" id="validation" style="display: none"></div>
-                <div id="resultContent" class="well well-sm" style="display: none"></div>
+                <div id="resultContent" style="display: none">
+                </div>
             </div>
         </div>
     </div>
@@ -147,6 +147,7 @@
         var fileUpload = $('#fileUpload');
         var progress = $('.progress');
         var progressBar = $('.progress-bar');
+        var downloadoptions = $('.downloadoptions');
         var encryptedFile = $('#encryptedFile');
         var decryptedFile = $('#decryptedFile');
         var validation = $('#validation');
@@ -174,6 +175,7 @@
             fileUpload.on('change', function () {
                 encryptedFile.hide();
                 decryptedFile.hide();
+                downloadoptions.empty();
             });
 
             radioInput.change(function () {
@@ -234,8 +236,10 @@
                         var items = [];
 
                         $.each(data.Items, function (i, v) {
-                                                           items.push(v);
-                                                   });
+                            if (v.SubjectName.indexOf('Signing') != -1) {
+                                items.push(v);
+                            }
+                        });
 
                         data.Items = items;
                         reciplist = data.Items;
@@ -283,6 +287,8 @@
                 validation.hide();
                 resultContent.hide();
                 alertMessage.hide();
+                downloadoptions.empty();
+
                 if (!fieldsvalidation()) return;
 
                 goButton.attr('disabled', 'disabled');
@@ -340,45 +346,54 @@
 
                 sign()
                     .done(function (result) {
-                        var file = fileUpload[0].files[0];
-                        //var extension = file.name.split('.').pop();
-                        //var fileName = file.name.replace('.' + extension, '');
-                        //ZipFiles(fileUpload[0].files).done(function (value) {
-                        FileToBase64(file)
-                            .done(function (content) {
-                                var item = result.Items[0];
-                                var ri = parseInt(selectedRecipRowId.substring(5));
-                                var req = {
-                                    signer: item.KeyIdent,
-                                    spin: spin.val(),
-                                    recipients: [reciplist[ri].PemBytes],
-                                    content: content.target.result
-                                };
 
-                                post(linkEncrypt, req)
-                                    .done(function (result) {
+                        $.each(fileUpload[0].files, function (i, file) {
 
-                                        if (result.status && result.status.startsWith('ERROR')) {
-                                            alertMessage[0].innerHTML = result.status;
-                                            alertMessage.show();
-                                            defer.reject();
-                                            return;
-                                        }
-                                        var hash = CryptoJS.SHA256(result.cms).toString();
+                            FileToBase64(file)
+                                .done(function (content) {
+                                    var item = result.Items[0];
+                                    var ri = parseInt(selectedRecipRowId.substring(5));
+                                    var req = {
+                                        signer: item.KeyIdent,
+                                        spin: spin.val(),
+                                        recipients: [reciplist[ri].PemBytes],
+                                        content: content.target.result
+                                    };
+
+                                    post(linkEncrypt, req)
+                                        .done(function (result) {
+
+                                            if (result.status && result.status.startsWith('ERROR')) {
+                                                alertMessage[0].innerHTML = result.status;
+                                                alertMessage.show();
+                                                defer.reject();
+                                                return;
+                                            }
+                                            var hash = CryptoJS.SHA256(result.cms).toString();
+
+                                            var data = makeTextFile(result.cms + hashSeparator + hash);
 
 
+                                            jQuery('<a/>', {
+                                                id: 'id_' + i,
+                                                href: data,
+                                                class: 'btn btn-primary',
+                                                style: 'margin-right: 5px;',
+                                                title: 'Download: ' + file.name + '.enist',
+                                                text: 'Download: ' + file.name + '.enist',
+                                                download: file.name + '.enist'
+                                            }).appendTo(downloadoptions);
 
-                                        var data = makeTextFile(result.cms + hashSeparator + hash);
-                                        encryptedFile[0].href = data;
-                                        encryptedFile[0].download = file.name + '.enist';
-                                        encryptedFile.show();
-                                        defer.resolve(result);
-                                    })
-                                    .fail(function (err) {
-                                        defer.reject(err);
-                                    });
-                            });
-                        //});
+                                            //                                            encryptedFile[0].href = data;
+                                            //                                            encryptedFile[0].download = file.name + '.enist';
+                                            //                                            encryptedFile.show();
+                                            defer.resolve(result);
+                                        })
+                                        .fail(function (err) {
+                                            defer.reject(err);
+                                        });
+                                });
+                        });
 
                     })
                     .fail(function (err) {
@@ -404,72 +419,97 @@
 
             function decrypt() {
                 var defer = $.Deferred();
-                var file = fileUpload[0].files[0];
-                var extension = file.name.split('.').pop();
-                var fileName = file.name.replace('.' + extension, '');
+                //                var file = fileUpload[0].files[0];
+                //                var extension = file.name.split('.').pop();
+                //                var fileName = file.name.replace('.' + extension, '');
 
                 sign()
                     .done(function (result) {
-                        var file = fileUpload[0].files[0];
-                        readTextFile(file)
-                            .done(function (content) {
-                                if (content.indexOf(hashSeparator) === -1) {
-                                    alertMessage[0].innerHTML = 'The file is invalid';
-                                    alertMessage.show();
-                                    defer.reject();
-                                    return;
-                                }
 
-                                var split = content.split(hashSeparator);
-                                var hash = CryptoJS.SHA256(split[0]).toString();
-                                var isValid = hash === split[1];
+                        $.each(fileUpload[0].files, function (i, file) {
 
-                                if (!isValid) {
-                                    alertMessage[0].innerHTML = 'The file is invalid';
-                                    alertMessage.show();
-                                    defer.reject();
-                                    return;
-                                }
 
-                                var item = result.Items[0];
-                                var req = {
-                                    spin: spin.val(),
-                                    content: split[0]
-                                };
+                            var extension = file.name.split('.').pop();
+                            var fileName = file.name.replace('.' + extension, '');
 
-                                post(linkDecrypt, req)
-                                    .done(function (result) {
-                                        if (result.status && result.status.startsWith('ERROR')) {
-                                            alertMessage[0].innerHTML = result.status;
-                                            alertMessage.show();
-                                            defer.reject();
+                            //var file = fileUpload[0].files[0];
+                            readTextFile(file)
+                                .done(function (content) {
+                                    if (content.indexOf(hashSeparator) === -1) {
+                                        alertMessage[0].innerHTML = 'The file' + fileName + ' is invalid';
+                                        alertMessage.show();
+                                        defer.reject();
+                                        return;
+                                    }
 
-                                            return;
-                                        }
+                                    var split = content.split(hashSeparator);
+                                    var hash = CryptoJS.SHA256(split[0]).toString();
+                                    var isValid = hash === split[1];
 
-                                        if (result.content) {
-                                            if (result.content.startsWith('data:')) {
-                                                decryptedFile[0].href = result.content;
-                                                decryptedFile[0].download = fileName;
-                                                decryptedFile.show();
-                                            } else {
-                                                resultContent[0].innerHTML = result.content;
-                                                resultContent.show();
-                                                JSONToCSVConvertor([JSON.parse(result.content)], fileName, true);
+                                    if (!isValid) {
+                                        alertMessage[0].innerHTML = 'The file' + fileName + ' is invalid';
+                                        alertMessage.show();
+                                        defer.reject();
+                                        return false;
+                                    }
+
+                                    var item = result.Items[0];
+                                    var req = {
+                                        spin: spin.val(),
+                                        content: split[0]
+                                    };
+
+                                    post(linkDecrypt, req)
+                                        .done(function (result) {
+                                            if (result.status && result.status.startsWith('ERROR')) {
+                                                alertMessage[0].innerHTML = result.status;
+                                                alertMessage.show();
+                                                defer.reject();
+
+                                                return false;
                                             }
 
-                                            defer.resolve(result);
-                                        } else {
-                                            validation[0].innerHTML = result.status;
-                                            validation.show();
-                                            defer.reject(result.status);
-                                        }
+                                            if (result.content) {
+                                                if (result.content.startsWith('data:')) {
+                                                    jQuery('<a/>', {
+                                                        id: 'id_' + i,
+                                                        href: result.content,
+                                                        class: 'btn btn-primary',
+                                                        title: 'Download: ' + fileName,
+                                                        text: 'Download: ' + fileName,
+                                                        download: fileName
+                                                    }).appendTo(downloadoptions);
 
-                                    })
-                                    .fail(function (err) {
-                                        defer.reject(err);
-                                    });
-                            });
+                                                    //                                                    decryptedFile[0].href = result.content;
+                                                    //                                                    decryptedFile[0].download = fileName;
+                                                    //                                                    decryptedFile.show();
+                                                } else {
+                                                    resultContent.show();
+
+                                                    jQuery('<div/>', {
+                                                        id: 'idBio_' + i,
+                                                        class: 'well well-sm',
+                                                    }).appendTo(resultContent);
+
+                                                    $('#idBio_' + i)[0].innerHTML = result.content;
+                                                    //resultContent[0].innerHTML = result.content;
+                                                    //                                                    resultContent.show();
+                                                    JSONToCSVConvertor([JSON.parse(result.content)], fileName, true, '#idBio_' + i);
+                                                }
+
+                                                defer.resolve(result);
+                                            } else {
+                                                validation[0].innerHTML = result.status;
+                                                validation.show();
+                                                defer.reject(result.status);
+                                            }
+
+                                        })
+                                        .fail(function (err) {
+                                            defer.reject(err);
+                                        });
+                                });
+                        });
                     })
                     .fail(function (err) {
                         defer.reject(err);
@@ -557,7 +597,7 @@
                 return defer.promise();
             }
 
-            function JSONToCSVConvertor(JSONData, ReportTitle, ShowLabel) {
+            function JSONToCSVConvertor(JSONData, ReportTitle, ShowLabel, parentId) {
                 //If JSONData is not an object then JSON.parse will parse the JSON string in an Object
                 var arrData = typeof JSONData != 'object' ? JSON.parse(JSONData) : JSONData;
 
@@ -617,17 +657,28 @@
                 // or you will not get the correct file extension    
 
                 //this trick will generate a temp <a /> tag
-                var link = document.createElement("a");
-                link.href = uri;
+                if (!parentId) {
+                    var link = document.createElement("a");
+                    link.href = uri;
 
-                //set the visibility hidden so it will not effect on your web-layout
-                link.style = "visibility:hidden";
-                link.download = fileName + ".csv";
+                    //set the visibility hidden so it will not effect on your web-layout
+                    link.style = "visibility:hidden";
+                    link.download = fileName + ".csv";
 
-                //this part will append the anchor tag and remove it after automatic click
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                    //this part will append the anchor tag and remove it after automatic click
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                } else {
+                    jQuery('<a/>', {
+                        href: uri,
+                        class: 'btn btn-primary',
+                        style: 'display: block',
+                        title: 'Download Bio: ' + fileName + ".csv",
+                        text: 'Download Bio: ' + fileName + ".csv",
+                        download: fileName + ".csv"
+                    }).appendTo($(parentId));
+                }
             }
 
             refreshRecipList();
